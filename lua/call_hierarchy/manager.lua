@@ -58,70 +58,26 @@ function Manager.process_incoming_calls()
             local previewer_data = {}
 
             for _, call in ipairs(calls) do
-                local callee             = item.name
-                local caller             = call.from
-                local caller_filename    = vim.fn.fnamemodify(vim.uri_to_fname(caller.uri), ":t")
-                local caller_fullpath    = vim.uri_to_fname(caller.uri)
-                local caller_funcname    = caller.name
-                local caller_uri         = caller.uri
-                    
-                local caller_location    = {
-                    {
-                        start = {
-                            line      = caller.range.start.line + 1, -- line is one before the corresponding line
-                            character = caller.range.start.character + 1 -- start character is one before the start of the pattern
-                        },
-                        stop = {
-                            line      = caller.range["end"].line + 1,
-                            character = caller.range["end"].character
-                        },
-                    },
-                }
-
-
+                local caller_filename    = vim.fn.fnamemodify(vim.uri_to_fname(call.from.uri), ":t")
+                local caller_funcname    = call.from.name
                 local calls_location = {}
-                for _, calls in ipairs(call.fromRanges) do
-                    local loc = {
-                        start = {
-                            line = calls.start.line + 1,
-                            character = calls.start.character + 1
-                        },
-                        stop = {
-                            line = calls["end"].line + 1,
-                            character = calls["end"].character
-                        }
-                    }
-                    table.insert(calls_location, loc)
 
-                    -- New data to set 
+                for _, calls in ipairs(call.fromRanges) do
                     local call_location_link = {
-                            uri = caller.uri,
+                            uri = call.from.uri,
                             range = {
-                                start = { line = calls.start.line + 1, character = calls.start.character }, -- The target line is 1 more (dunno why)
-                                ["end"] = { line = calls["end"].line + 1, character = calls["end"].character } -- The target line is 1 more (dunno why)
+                                start = { line = calls.start.line , character = calls.start.character }, -- The target line is 1 more (dunno why)
+                                ["end"] = { line = calls["end"].line , character = calls["end"].character } -- The target line is 1 more (dunno why)
                             }
                         }
-                    local format = string.format("·%s (%s:%s)", caller_funcname, caller_filename, calls.start.line)
+                    local format = string.format("·%s (%s:%s)", caller_funcname, caller_filename, calls.start.line + 1)
 
                     table.insert(previewer_data, {format = format, location_link = call_location_link})
                 end
-
-                table.insert(locations, {
-                    callee             = callee,
-                    caller_filename    = caller_filename,
-                    caller_fullpath    = caller_fullpath,
-                    caller_funcname    = caller_funcname,
-                    caller_uri         = caller_uri,
-                    caller_location    = caller_location,
-                    calls_location     = calls_location,
-                    previewer_data     = previewer_data,
-                })
             end
 
-            -- log.error("location is ", vim.inspect(locations))
             -- Callback are asynchronous, value must be set in config struct
-            Manager.locations = locations
-            Manager.locations2 = previewer_data
+            Manager.location = previewer_data
             Manager.process_done = true
         end)
     end)
@@ -139,7 +95,7 @@ function Manager.update_calltree()
         return
     end
 
-    Manager.file_previewer.display(Manager.locations2)
+    Manager.file_previewer.display(Manager.location)
 
             -- log.error("location is ", vim.inspect(locations))
             -- Callback are asynchronous, value must be set in config struct

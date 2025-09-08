@@ -6,20 +6,18 @@ local FilePreviewer = {
     file_buffer = nil,
     preview_buffer = nil,
 
+-- loaded_files is composed of
+-- - format
+-- - location_link
+--     - uri
+--     - range
+--         - start
+--             - line
+--             - character
+--         - ["end"] 
+--             - line
+--             - character
     loaded_files = nil, -- Contains file information in an array of tables
-    -- Composed of :
-    -- filename
-    -- uri
-    -- line
-    -- character
-    --         local location_link = {
-            --     uri = file_to_load.uri,
-            --     range = {
-            --         start = { line = file_to_load.uri - 1, character = file_to_load.character }, -- The target line is 1 more (dunno why)
-            --         ["end"] = { line = file_to_load.uri - 1, character = file_to_load.character } -- The target line is 1 more (dunno why)
-            --     }
-            -- }
-
 }
 
 -- --------------------------------------------------------------------------------------
@@ -170,8 +168,7 @@ function FilePreviewer.create(window_name)
     -- <CR> : Open the file in neovim default last buffer location
     -- q    : remove calltree
     -- <Esc>: remove calltree
-    -- on cursor move : update preview window
-    -- Jump to location
+    -- on cursor move : update preview window Jump to location
 
     -- Close window
     vim.keymap.set("n", "q", FilePreviewer.close, { buffer = buf, desc = "Close window" })
@@ -228,8 +225,8 @@ function FilePreviewer.create(window_name)
         local location_link = {
                 uri = file_to_load.location_link.uri,
                 range = {
-                    start = { line = file_to_load.location_link.range.start.line - 1, character = file_to_load.location_link.range.start.character }, -- The target line is 1 more (dunno why)
-                    ["end"] = { line = file_to_load.location_link.range['end'].line - 1, character = file_to_load.location_link.range['end'].character } -- The target line is 1 more (dunno why)
+                    start = { line = file_to_load.location_link.range.start.line , character = file_to_load.location_link.range.start.character }, -- The target line is 1 more (dunno why)
+                    ["end"] = { line = file_to_load.location_link.range['end'].line , character = file_to_load.location_link.range['end'].character } -- The target line is 1 more (dunno why)
                 }
             }
 
@@ -275,7 +272,7 @@ function FilePreviewer.create(window_name)
             return
         end
 
-        FilePreviewer.update_preview(file_to_load.location_link.uri, file_to_load.location_link.range.start.line, file_to_load.location_link.range.start.character)
+        FilePreviewer.update_preview(file_to_load.location_link.uri, file_to_load.location_link.range.start.line + 1, file_to_load.location_link.range.start.character)
     end
 
     -- Crée un groupe d'autocommandes dédié qui sera nettoyé à chaque appel
@@ -308,6 +305,7 @@ function FilePreviewer.display(data)
         log.error("file_buffer not found")
         return
     end
+        log.error("file_buffer not found", vim.inspect(data))
 
     -- Load data in file_buffer for every item found in location_link
     for _, it in ipairs(data) do
