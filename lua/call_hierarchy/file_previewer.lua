@@ -5,6 +5,9 @@ local FilePreviewer = {
     preview_window = nil,
     file_buffer = nil,
     preview_buffer = nil,
+    height_size = 1,
+    width_size = 1,
+    preview_size = 0.7,
 
 -- loaded_files is composed of
 -- - format
@@ -18,6 +21,8 @@ local FilePreviewer = {
 --             - line
 --             - character
     loaded_files = nil, -- Contains file information in an array of tables
+
+    process_cb = nil
 }
 
 -- --------------------------------------------------------------------------------------
@@ -103,7 +108,7 @@ end
 --  Windows and buffers don't exist. they shall be created (At first use or when a new calltree is asked)
 --  Window are removed, but buffer still exist with preivous data, Thus, window should be created and fullfilled with buffer (at any other use)
 -- --------------------------------------------------------------------------------------
-function FilePreviewer.create(window_name)
+function FilePreviewer.create(window_name, process_cb)
 
     if FilePreviewer.file_window or FilePreviewer.preview_window then
         log.debug("Floating windows already present. Nothing to do")
@@ -129,12 +134,14 @@ function FilePreviewer.create(window_name)
 
     FilePreviewer.previous_win = vim.api.nvim_get_current_win()
 
-    local total_width             = math.floor(vim.o.columns * 0.7)
-    local total_height            = math.floor(vim.o.lines * 0.7)
-    local row                     = math.floor((vim.o.lines - total_height) / 2)
+    local total_width             = math.floor(vim.o.columns * FilePreviewer.width_size)
+    local total_height            = math.floor((vim.o.lines ) * FilePreviewer.height_size) - 3
+    local row                     = math.floor((vim.o.lines  - total_height) / 2)
     local col                     = math.floor((vim.o.columns - total_width) / 2)
-    local left_width              = math.floor(total_width * 0.4)
+    local left_width              = math.floor(total_width * (1 - FilePreviewer.preview_size))
     local right_width             = total_width - left_width - 1
+
+    log.info("value of windows ", window_name)
 
     FilePreviewer.file_window = vim.api.nvim_open_win(FilePreviewer.file_buffer, true, {
         relative = "editor",
@@ -163,6 +170,8 @@ function FilePreviewer.create(window_name)
     vim.api.nvim_win_set_option(FilePreviewer.file_window, "cursorline", true)
     vim.api.nvim_win_set_option(FilePreviewer.preview_window, "number", true)
     vim.api.nvim_win_set_option(FilePreviewer.preview_window, "cursorline", true)
+    vim.api.nvim_win_set_option(FilePreviewer.preview_window, "wrap", false)
+    vim.api.nvim_win_set_option(FilePreviewer.file_window, "wrap", false)
 
     -- When windows are created, Add keymap to the window
     -- <CR> : Open the file in neovim default last buffer location
@@ -174,10 +183,30 @@ function FilePreviewer.create(window_name)
     vim.keymap.set("n", "q", FilePreviewer.close, { buffer = buf, desc = "Close window" })
     vim.keymap.set("n", "<Esc>", FilePreviewer.close, { buffer = buf, desc = "Close window" })
 
+    vim.keymap.set("n", "<space>", function()
+        local buffer_line = vim.api.nvim_win_get_cursor(0)[1]
+
+        if type(buffer_line) ~= "number" then
+            log.error("line couldn't be parsed. Abort operation")
+            return
+        end
+
+        if FilePreviewer.loaded_files == nil then
+            log.error("No loaded file found. Abort operation")
+            return
+        end
+
+        if FilePreviewer.loaded_files[buffer_line] == nil then
+            log.error("No file found at index:", buffer_line)
+            return
+        end
+
+        local file_to_load = FilePreviewer.loaded_files[buffer_line]
+        FilePreviewer.process_cb(file_to_load)
+    end, { buffer = buf, desc = "process line" })
+
     vim.keymap.set("n", "<CR>", function()
         local buffer_line = vim.api.nvim_win_get_cursor(0)[1]
-        log.info("loading file at pos:", buffer_line)
-        log.info("loading file at pos:", FilePreviewer.loaded_files)
 
         if type(buffer_line) ~= "number" then
             log.error("line couldn't be parsed. Abort operation")
@@ -201,7 +230,6 @@ function FilePreviewer.create(window_name)
             vim.api.nvim_set_current_win(target_win)
         else
             local wins = vim.api.nvim_list_wins()
-            log.info("windows are ", vim.inspect(wins))
             for _, win in ipairs(wins) do
                 if vim.api.nvim_win_get_config(win).relative == "" then
                     vim.api.nvim_set_current_win(win)
@@ -220,8 +248,6 @@ function FilePreviewer.create(window_name)
         local client = clients[1]
         local encoding = client and client.offset_encoding or "utf-16"
 
-        log.info("file to load : ", vim.inspect(file_to_load))
-
         local location_link = {
                 uri = file_to_load.location_link.uri,
                 range = {
@@ -230,7 +256,6 @@ function FilePreviewer.create(window_name)
                 }
             }
 
-        log.info("location link : ", location_link)
 
         FilePreviewer.close()
 
@@ -240,7 +265,6 @@ function FilePreviewer.create(window_name)
     -- -- Set up autocmd to update preview on any cursor movement
     local function preview_on_cursor_move()
         local buffer_line = vim.api.nvim_win_get_cursor(0)[1]
-        log.info("loading file at pos:", buffer_line)
 
         if type(buffer_line) ~= "number" then
             log.error("line couldn't be parsed. Abort operation")
@@ -248,7 +272,7 @@ function FilePreviewer.create(window_name)
         end
 
         if FilePreviewer.loaded_files == nil then
-            log.debug("No loaded file found. Abort operation")
+            log.error("No loaded file found. Abort operation")
             return
         end
 
@@ -272,7 +296,13 @@ function FilePreviewer.create(window_name)
             return
         end
 
-        FilePreviewer.update_preview(file_to_load.location_link.uri, file_to_load.location_link.range.start.line + 1, file_to_load.location_link.range.start.character)
+        if file_to_load.caller_location_link ~= nil then
+            -- To show where the caller is 
+            FilePreviewer.update_preview(file_to_load.caller_location_link.uri, file_to_load.caller_location_link.range.start.line + 1, file_to_load.caller_location_link.range.start.character)
+        else
+            -- To show the where the call is done
+            FilePreviewer.update_preview(file_to_load.location_link.uri, file_to_load.location_link.range.start.line + 1, file_to_load.location_link.range.start.character)
+        end
     end
 
     -- Crée un groupe d'autocommandes dédié qui sera nettoyé à chaque appel
@@ -285,6 +315,7 @@ function FilePreviewer.create(window_name)
         callback = preview_on_cursor_move,
     })
 
+    FilePreviewer.process_cb = process_cb
 end
 
 -- --------------------------------------------------------------------------------------
@@ -305,7 +336,6 @@ function FilePreviewer.display(data)
         log.error("file_buffer not found")
         return
     end
-        log.error("file_buffer not found", vim.inspect(data))
 
     -- Load data in file_buffer for every item found in location_link
     for _, it in ipairs(data) do
