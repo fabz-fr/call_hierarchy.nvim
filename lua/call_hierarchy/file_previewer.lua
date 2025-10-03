@@ -25,6 +25,43 @@ local FilePreviewer = {
     process_cb = nil
 }
 
+
+-- --------------------------------------------------------------------------------------
+-- File Preview migh process file in recursive mode. It means that file structure containg subfiles
+-- - File1
+--      - File1_A
+--      - File1_B
+-- - File2
+-- - File3
+--      -File3_A
+--  ...
+--
+--  @param data: Data containing the data structure
+--  @param id: the line number were the command was executed
+--  @return: The data of the matched file
+-- --------------------------------------------------------------------------------------
+local function process_file(data, id)
+    for i, it in ipairs(data) do
+        if id == 1 then
+            return it, id
+        end
+
+        id = id - 1
+
+        if it.subcalls ~= nil then
+            local retval, retid = process_file(it.subcalls, id)
+            if retval ~= nil then
+                return retval, retid
+            else
+                id = retid
+            end
+        end
+    end
+    return nil, id
+end
+
+
+
 -- --------------------------------------------------------------------------------------
 -- Close the window but keep the buffer in place
 -- --------------------------------------------------------------------------------------
@@ -196,12 +233,30 @@ function FilePreviewer.create(window_name, process_cb)
             return
         end
 
-        if FilePreviewer.loaded_files[buffer_line] == nil then
+        -- We can have several levels of files. so the line number is not the index of the file in
+        -- the list. If we have several level of file, we have to check the sub files
+        file_to_process = process_file(FilePreviewer.loaded_files, buffer_line)
+
+        if file_to_process == nil then
             log.error("No file found at index:", buffer_line)
             return
         end
 
-        local file_to_load = FilePreviewer.loaded_files[buffer_line]
+        local file_to_load = file_to_process
+
+        if file_to_load == nil then
+            log.error("No file to load for preview")
+            return
+        end
+        if file_to_load.location_link.uri == nil then
+            log.error("file to preview doesn't contain uri")
+            return
+        end
+        if file_to_load.location_link.range.start.line == nil or file_to_load.location_link.range.start.character == nil then
+            log.error("wrong line of character value for previewing file")
+            return
+        end
+
         FilePreviewer.process_cb(file_to_load)
     end, { buffer = buf, desc = "process line" })
 
@@ -276,12 +331,16 @@ function FilePreviewer.create(window_name, process_cb)
             return
         end
 
-        if FilePreviewer.loaded_files[buffer_line] == nil then
+        -- We can have several levels of files. so the line number is not the index of the file in
+        -- the list. If we have several level of file, we have to check the sub files
+        file_to_process = process_file(FilePreviewer.loaded_files, buffer_line)
+
+        if file_to_process == nil then
             log.error("No file found at index:", buffer_line)
             return
         end
 
-        local file_to_load = FilePreviewer.loaded_files[buffer_line]
+        local file_to_load = file_to_process
 
         if file_to_load == nil then
             log.error("No file to load for preview")
@@ -318,6 +377,25 @@ function FilePreviewer.create(window_name, process_cb)
     FilePreviewer.process_cb = process_cb
 end
 
+local function fmt(data)
+    local format = ""
+
+    for _, it in pairs(data) do
+        format = format .. "\n" .. it.format or ""
+        if it.format == nil then
+            log.info("no format found for value ", vim.inspect(it))
+        end
+
+        if it.subcalls ~= nil then
+            local d = fmt(it.subcalls) or ""
+            format = format .. "\n" .. d
+        end
+
+    end
+
+    return format
+end
+
 -- --------------------------------------------------------------------------------------
 -- Display New data in file_buffer
 -- Data must contains:
@@ -338,13 +416,10 @@ function FilePreviewer.display(data)
     end
 
     -- Load data in file_buffer for every item found in location_link
-    for _, it in ipairs(data) do
-        if it.format == nil or it.location_link == nil then
-            log.error("unexpected args. Should contain a valid data containing format and location_link at least :", vim.inspect(data))
-            return
-        end
+    local format = fmt(data)
 
-        table.insert(buffer_content, it.format)
+    for line in format:gmatch("[^\r\n]+") do
+      table.insert(buffer_content, line)
     end
 
     vim.api.nvim_buf_set_option(FilePreviewer.file_buffer, "modifiable", true)

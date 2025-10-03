@@ -5,13 +5,51 @@ local Manager = {
     calltree_window = nil,
     preview_buf = nil,
     preview_window = nil,
-    locations = {},
     previous_win = nil, -- Previous neovim window, where cursor was. This variable is used to open the preview buffer in the last window used !
     dummy_buffer = nil, -- dummy buffer used to fill calltree windows during their creation
     process_done = true,
     file_previewer = nil,
     value_to_process = nil,
 }
+
+local function deep_copy(orig)
+  local copy
+  if type(orig) == 'table' then
+    copy = {}
+    for k, v in next, orig, nil do
+      copy[deep_copy(k)] = deep_copy(v)
+    end
+    setmetatable(copy, deep_copy(getmetatable(orig)))
+  else
+    copy = orig
+  end
+  return copy
+end
+
+function copy(t)
+  local u = { }
+  for k, v in pairs(t) do u[k] = v end
+  return setmetatable(u, getmetatable(t))
+end
+
+function tables_equal(t1, t2)
+  if t1 == t2 then return true end
+  if type(t1) ~= "table" or type(t2) ~= "table" then return false end
+
+  for k, v in pairs(t1) do
+    if type(v) == "table" and type(t2[k]) == "table" then
+      if not tables_equal(v, t2[k]) then return false end
+    elseif v ~= t2[k] then
+      return false
+    end
+  end
+
+  for k in pairs(t2) do
+    if t1[k] == nil then return false end
+  end
+
+  return true
+end
 
 -- --------------------------------------------------------------------------------------
 -- Check the incoming calls where cursor currently is
@@ -35,6 +73,7 @@ local Manager = {
 -- --------------------------------------------------------------------------------------
 function Manager.process_incoming_calls(uri, line, character)
     local params = nil
+    Manager.process_done = false
 
     -- Si uri, line ou character ne sont pas fournis, on utilise la position actuelle du curseur
     if not uri or not line or not character then
@@ -60,23 +99,24 @@ function Manager.process_incoming_calls(uri, line, character)
         return
     end
 
-    local locations = {}
-
-    Manager.process_done = false
-
     vim.lsp.buf_request(bufnr, "textDocument/prepareCallHierarchy", params, function(err, items)
         if err or not items or vim.tbl_isempty(items) then
             log.error("No call hierarchy items found")
             Manager.process_done = true
-            return locations
+            return nil
         end
-        log.info("aaaaaaaaaaaa : " , vim.inspect(items))
 
         local item = items[1]
         Manager.value_to_process = {
-            format = "\t ─ " .. item.name,
-            funcname = nil,
-            caller_location_link = nil,
+            format = "·" .. item.name,
+            funcname = item.name,
+            caller_location_link = {
+                uri = item.uri,
+                range = {
+                    start = { line = item.selectionRange.start.line , character = item.selectionRange.start.character }, -- The target line is 1 more (dunno why)
+                    ["end"] = { line = item.selectionRange["end"].line , character = item.selectionRange["end"].character } -- The target line is 1 more (dunno why)
+                }
+            },
             location_link = {
                 uri = item.uri,
                 range = {
@@ -90,11 +130,10 @@ function Manager.process_incoming_calls(uri, line, character)
             if err2 or not calls or vim.tbl_isempty(calls) then
                 log.error("No incoming calls found")
                 Manager.process_done = true
-                return locations
+                return nil
             end
 
             log.info("Get incoming calls")
-        log.info("bbbbbbbbb : " , vim.inspect(calls))
 
             local previewer_data = {}
 
@@ -118,7 +157,7 @@ function Manager.process_incoming_calls(uri, line, character)
                                 ["end"] = { line = calls["end"].line , character = calls["end"].character } -- The target line is 1 more (dunno why)
                             }
                         }
-                    local format = string.format("─ %s()", caller_funcname)
+                    local format = ""
 
                     table.insert(previewer_data, {format = format, funcname = caller_funcname, location_link = call_location_link, caller_location_link = caller_location_link})
                 end
@@ -128,46 +167,111 @@ function Manager.process_incoming_calls(uri, line, character)
             -- function that is present in the location variable. So we must update the formatting
             -- of this particular value. The value must be retrieved, it must be right shifted.
             -- Then the new value must be set added before this particular function
-            if Manager.location ~= nil then
-                log.info("location is not empty")
-                local idx = nil
-                for i, it in ipairs(Manager.location) do
-                    log.info("comparing ", it.funcname, " with " , Manager.value_to_process)
-                    if it.funcname == Manager.value_to_process then
-                        it.format = "\t" .. it.format
-                        log.info("found value : ", vim.inspect(it))
-                        if idx == nil then
-                            idx = i
+            if #Manager.location ~= 0 then
+                log.info("location is not empty : ", #Manager.location)
+                local value_found = false
+
+                local function add_data(data_to_check, input)
+                    -- log.info("data to check " , data_to_check)
+                    -- log.info("input " , vim.inspect(input))
+                    for k, v in ipairs(data_to_check) do
+
+                        -- log.info("comparing values : ")
+                        -- log.info(" ", v.funcname                 )
+                        -- log.info(" ", v.caller_location_link.range["end"].character   )
+                        -- log.info(" ", v.caller_location_link.range["end"].line        )
+                        -- log.info(" ", v.caller_location_link.range.start.character    )
+                        -- log.info(" ", v.caller_location_link.range.start.line         )
+                        -- log.info(" ", v.caller_location_link.uri                      )
+                        -- log.info("comparing values : ")
+                        -- log.info( " " , input.funcname )
+                        -- log.info( " " , input.caller_location_link.range["end"].character )
+                        -- log.info( " " , input.caller_location_link.range["end"].line      )
+                        -- log.info( " " , input.caller_location_link.range.start.character  )
+                        -- log.info( " " , input.caller_location_link.range.start.line       )
+                        -- log.info( " " , input.caller_location_link.uri                    )
+
+                        if data_to_check[k].subcalls ~= nil then
+                            add_data(data_to_check[k].subcalls, input)
                         end
+
+                        if  v.funcname                                       == input.funcname 
+                         and v.caller_location_link.range["end"].character   == input.caller_location_link.range["end"].character 
+                         and v.caller_location_link.range["end"].line        == input.caller_location_link.range["end"].line      
+                         and v.caller_location_link.range.start.character    == input.caller_location_link.range.start.character  
+                         and v.caller_location_link.range.start.line         == input.caller_location_link.range.start.line       
+                         and v.caller_location_link.uri                      == input.caller_location_link.uri                    
+                         and value_found == false
+                         then
+                            log.info("value found is at index ", k)
+                            value_found = true
+                            data_to_check[k].subcalls = deep_copy(previewer_data)
+                        end
+
                     end
                 end
 
-                -- insert all element at position i
-                if idx ~= nil then
-                    for i, it in ipairs(previewer_data) do
-                        table.insert(Manager.location, idx, it)
-                    end
-                end
+                add_data(Manager.location, Manager.value_to_process)
 
-                Manager.process_done = true
+                -- If value wasn't found, it means the value to process is the origin value
             else
-                -- Callback are asynchronous, value must be set in config struct
-                table.insert(previewer_data, Manager.value_to_process)
-                Manager.location = previewer_data
-                Manager.process_done = true
+                Manager.value_to_process.subcalls = deep_copy(previewer_data)
+                table.insert(Manager.location, Manager.value_to_process)
             end
+
+            Manager.format()
+            Manager.process_done = true
         end)
     end)
 end
 
+local function fmt(data, format) 
+    local tabs = format
+
+    -- if level > 1 then
+    --     tabs = string.rep("│   ", level - 1)
+    -- end
+
+    for i, it in ipairs(data) do
+        if it.subcalls ~= nil then
+            local next_format = tabs
+            if i == #data then
+                next_format = next_format .. "    "
+            else
+                next_format = next_format .. "│   "
+            end
+            it.subcalls = fmt(it.subcalls, next_format)
+        end
+        if i < #data then
+            begin_format = tabs .. "├──"
+        else
+            begin_format = tabs .. "└──"
+        end
+        -- If last value 
+        if i == #data then
+            it.format = string.format("%s %s()", begin_format, it.funcname)
+        else
+            it.format = string.format("%s %s()", begin_format, it.funcname)
+        end
+    end
+    return data
+end
+
+function Manager.format()
+    -- First one is always the original one
+    Manager.location[1].format = string.format("· %s()", Manager.location[1].funcname)
+
+    if Manager.location[1].subcalls ~= nil then
+        local begin_format = ""
+        Manager.location[1].subcalls  = deep_copy(fmt(Manager.location[1].subcalls, begin_format))
+    end
+end
 
 -- --------------------------------------------------------------------------------------
--- Update calltree buffer with new values, from CallHierarchy.locations
+-- Update calltree buffer with new values, from CallHierarchy.location
 -- --------------------------------------------------------------------------------------
 function Manager.update_calltree()
-    log.info("todo : format value and send it to file previewer")
-
-    if Manager.locations == nil then
+    if Manager.location == nil then
         log.error("Error Call hierarchy is empty nothing to update")
         return
     end
@@ -214,82 +318,14 @@ function Manager.process_cb(loaded_file)
 
     -- Update calltree window with new information
     Manager.update_calltree()
-  -- -- 1. Exécuter la requête LSP pour 'textDocument/callHierarchy' pour obtenir les CallHierarchyItem
-  -- vim.lsp.buf_request( bufnr, "textDocument/prepareCallHierarchy", hierarchy_params,
-  --   function(err, call_hierarchy_items, ctx)
-  --     if err then
-  --       log.info("Erreur lors de la récupération de la hiérarchie d'appels: " .. err.message)
-  --       return
-  --     end
-  --
-  --     if not call_hierarchy_items or #call_hierarchy_items == 0 then
-  --       log.info("Aucun CallHierarchyItem trouvé à la position spécifiée.")
-  --       return
-  --     end
-  --
-  --     -- Généralement, il ne devrait y avoir qu'un seul CallHierarchyItem pour une position donnée.
-  --     local call_hierarchy_item = call_hierarchy_items[1]
-  --     log.info("CallHierarchyItem trouvé: " .. vim.inspect(call_hierarchy_item))
-  --
-  --     -- 2. Une fois que nous avons le CallHierarchyItem, nous pouvons demander les appels entrants.
-  --     local incoming_calls_params = {
-  --       item = call_hierarchy_item
-  --     }
-  --
-  --     vim.lsp.buf_request(
-  --       bufnr,
-  --       "callHierarchy/incomingCalls",
-  --       incoming_calls_params,
-  --       function(err_calls, incoming_calls_result, ctx_calls)
-  --         if err_calls then
-  --           log.info("Erreur lors de la récupération des appels entrants: " .. err_calls.message)
-  --           return
-  --         end
-  --
-  --         if incoming_calls_result and #incoming_calls_result > 0 then
-  --             log.info("value found : ", vim.inspect(incoming_calls_result))
-  --           log.info("Appels entrants trouvés pour la fonction à " .. filepath .. ":" .. (position.line + 1) .. ":" .. (position.character + 1) .. ":")
-  --           for i, call in ipairs(incoming_calls_result) do
-  --             local from_item = call.from
-  --             local from_ranges = call.fromRanges -- Un tableau de plages où l'appel se produit
-  --
-  --             for j, from_range in ipairs(from_ranges) do
-  --               log.info(string.format("  %d.%d: Appelant: %s (URI: %s), Range: Line %d-%d, Char %d-%d",
-  --                 i, j,
-  --                 from_item.name,
-  --                 from_item.uri:gsub("file://", ""),
-  --                 from_range.start.line + 1,
-  --                 from_range["end"].line + 1,
-  --                 from_range.start.character + 1,
-  --                 from_range["end"].character + 1
-  --               ))
-  --             end
-  --           end
-  --         else
-  --           log.info("Aucun appel entrant trouvé.")
-  --         end
-  --       end
-  --     )
-  --   end
-  -- )
 end
 -- --------------------------------------------------------------------------------------
 -- Create the calltree window.
 -- Check calltree window doesn't exists, if they exists, remove them, and create it again
 -- --------------------------------------------------------------------------------------
 function Manager.show_incoming_calls()
-
-    -- local test = {
-    --     position = {
-    --         character = 16,
-    --         line = 171
-    --     },
-    --     textDocument = {
-    --         uri = "file:///home/fabien/Documents/test/neovim/src/nvim/fold.c"
-    --     }
-    --   }
-    --
-    Manager.location = nil
+    Manager.location = {}
+    Manager.process_done = false
 
     -- Start the the process of getting incoming calls
     -- Manager.process_incoming_calls(test.textDocument.uri, test.position.line, test.position.character)
