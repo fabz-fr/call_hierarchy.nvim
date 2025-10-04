@@ -60,8 +60,6 @@ local function process_file(data, id)
     return nil, id
 end
 
-
-
 -- --------------------------------------------------------------------------------------
 -- Close the window but keep the buffer in place
 -- --------------------------------------------------------------------------------------
@@ -273,12 +271,8 @@ function FilePreviewer.create(window_name, process_cb)
             return
         end
 
-        if FilePreviewer.loaded_files[buffer_line] == nil then
-            log.error("No file found at index:", buffer_line)
-            return
-        end
-
-        local file_to_load = FilePreviewer.loaded_files[buffer_line]
+        local file_to_load = process_file(FilePreviewer.loaded_files, buffer_line)
+        -- local file_to_load = FilePreviewer.loaded_files[buffer_line]
 
         local target_win = FilePreviewer.previous_win
         if target_win and vim.api.nvim_win_is_valid(target_win) then

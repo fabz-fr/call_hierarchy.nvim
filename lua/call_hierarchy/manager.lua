@@ -172,24 +172,7 @@ function Manager.process_incoming_calls(uri, line, character)
                 local value_found = false
 
                 local function add_data(data_to_check, input)
-                    -- log.info("data to check " , data_to_check)
-                    -- log.info("input " , vim.inspect(input))
                     for k, v in ipairs(data_to_check) do
-
-                        -- log.info("comparing values : ")
-                        -- log.info(" ", v.funcname                 )
-                        -- log.info(" ", v.caller_location_link.range["end"].character   )
-                        -- log.info(" ", v.caller_location_link.range["end"].line        )
-                        -- log.info(" ", v.caller_location_link.range.start.character    )
-                        -- log.info(" ", v.caller_location_link.range.start.line         )
-                        -- log.info(" ", v.caller_location_link.uri                      )
-                        -- log.info("comparing values : ")
-                        -- log.info( " " , input.funcname )
-                        -- log.info( " " , input.caller_location_link.range["end"].character )
-                        -- log.info( " " , input.caller_location_link.range["end"].line      )
-                        -- log.info( " " , input.caller_location_link.range.start.character  )
-                        -- log.info( " " , input.caller_location_link.range.start.line       )
-                        -- log.info( " " , input.caller_location_link.uri                    )
 
                         if data_to_check[k].subcalls ~= nil then
                             add_data(data_to_check[k].subcalls, input)
@@ -213,7 +196,7 @@ function Manager.process_incoming_calls(uri, line, character)
 
                 add_data(Manager.location, Manager.value_to_process)
 
-                -- If value wasn't found, it means the value to process is the origin value
+            -- If value wasn't found, it means the value to process is the origin value
             else
                 Manager.value_to_process.subcalls = deep_copy(previewer_data)
                 table.insert(Manager.location, Manager.value_to_process)
