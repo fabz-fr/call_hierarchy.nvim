@@ -1,0 +1,3 @@
+[submodule "lua/lua_utils"]
+	path = lua/lua_utils
+	url = git@github.com:fabz-fr/lua_utils.git
