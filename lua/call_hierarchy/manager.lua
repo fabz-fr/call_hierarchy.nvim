@@ -1,8 +1,3 @@
-local current_dir = debug.getinfo(1, "S").source:match("@?(.*/)")
-package.path = package.path .. ";" .. current_dir .. "../../libs/lua_utils/lua/?.lua;"
-    .. current_dir .. "../../libs/lua_utils/lua/?/init.lua"
-
-local tables = require("lua_utils.tables")
 local log = require('log')
 
 local Manager = {
@@ -16,6 +11,45 @@ local Manager = {
     file_previewer = nil,
     value_to_process = nil,
 }
+
+local function deep_copy(orig)
+  local copy
+  if type(orig) == 'table' then
+    copy = {}
+    for k, v in next, orig, nil do
+      copy[deep_copy(k)] = deep_copy(v)
+    end
+    setmetatable(copy, deep_copy(getmetatable(orig)))
+  else
+    copy = orig
+  end
+  return copy
+end
+
+function copy(t)
+  local u = { }
+  for k, v in pairs(t) do u[k] = v end
+  return setmetatable(u, getmetatable(t))
+end
+
+function tables_equal(t1, t2)
+  if t1 == t2 then return true end
+  if type(t1) ~= "table" or type(t2) ~= "table" then return false end
+
+  for k, v in pairs(t1) do
+    if type(v) == "table" and type(t2[k]) == "table" then
+      if not tables_equal(v, t2[k]) then return false end
+    elseif v ~= t2[k] then
+      return false
+    end
+  end
+
+  for k in pairs(t2) do
+    if t1[k] == nil then return false end
+  end
+
+  return true
+end
 
 -- --------------------------------------------------------------------------------------
 -- Check the incoming calls where cursor currently is
@@ -154,7 +188,7 @@ function Manager.process_incoming_calls(uri, line, character)
                          then
                             log.info("value found is at index ", k)
                             value_found = true
-                            data_to_check[k].subcalls = tables.deep_copy(previewer_data)
+                            data_to_check[k].subcalls = deep_copy(previewer_data)
                         end
 
                     end
@@ -164,7 +198,7 @@ function Manager.process_incoming_calls(uri, line, character)
 
             -- If value wasn't found, it means the value to process is the origin value
             else
-                Manager.value_to_process.subcalls = tables.deep_copy(previewer_data)
+                Manager.value_to_process.subcalls = deep_copy(previewer_data)
                 table.insert(Manager.location, Manager.value_to_process)
             end
 
@@ -212,7 +246,7 @@ function Manager.format()
 
     if Manager.location[1].subcalls ~= nil then
         local begin_format = ""
-        Manager.location[1].subcalls  = tables.deep_copy(fmt(Manager.location[1].subcalls, begin_format))
+        Manager.location[1].subcalls  = deep_copy(fmt(Manager.location[1].subcalls, begin_format))
     end
 end
 
@@ -231,8 +265,7 @@ end
 -- --------------------------------------------------------------------------------------
 -- Update Manager.location with new data
 -- --------------------------------------------------------------------------------------
-
-function Manager.process_cb(loaded_file)
+function Manager.process_cb(loaded_file, cursor_line, cursor_col)
   local uri = loaded_file.caller_location_link.uri
   local range = loaded_file.caller_location_link.range
 
@@ -267,6 +300,9 @@ function Manager.process_cb(loaded_file)
 
     -- Update calltree window with new information
     Manager.update_calltree()
+
+    -- Set cursor back to line and col 
+    vim.api.nvim_win_set_cursor(Manager.file_previewer.file_window, {cursor_line, cursor_col})
 end
 -- --------------------------------------------------------------------------------------
 -- Create the calltree window.
