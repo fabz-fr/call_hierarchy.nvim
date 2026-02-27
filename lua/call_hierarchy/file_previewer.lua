@@ -176,7 +176,7 @@ function FilePreviewer.create(window_name, process_cb)
     local left_width              = math.floor(total_width * (1 - FilePreviewer.preview_size))
     local right_width             = total_width - left_width - 1
 
-    log.info("value of windows ", window_name)
+    -- log.info("value of windows ", window_name)
 
     FilePreviewer.file_window = vim.api.nvim_open_win(FilePreviewer.file_buffer, true, {
         relative = "editor",
@@ -220,6 +220,7 @@ function FilePreviewer.create(window_name, process_cb)
 
     vim.keymap.set("n", "<space>", function()
         local buffer_line = vim.api.nvim_win_get_cursor(0)[1]
+        local buffer_col = vim.api.nvim_win_get_cursor(0)[2]
 
         if type(buffer_line) ~= "number" then
             log.error("line couldn't be parsed. Abort operation")
@@ -255,7 +256,7 @@ function FilePreviewer.create(window_name, process_cb)
             return
         end
 
-        FilePreviewer.process_cb(file_to_load)
+        FilePreviewer.process_cb(file_to_load, buffer_line, buffer_col)
     end, { buffer = buf, desc = "process line" })
 
     vim.keymap.set("n", "<CR>", function()
